@@ -1,0 +1,40 @@
+export interface Product {
+  id: string;
+  name: string;
+  sku: string;
+  price: number;
+  stockQuantity: number;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
+export interface CreateProductPayload {
+  name: string;
+  sku: string;
+  price: number;
+  initialStock: number;
+}
+
+export interface Order {
+  id: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+  customerEmail: string;
+  status: number;
+  createdAtUtc: string;
+}
+
+export interface CreateOrderPayload {
+  productId: string;
+  quantity: number;
+  customerEmail: string;
+}
+
+export interface ProblemDetailsError {
+  title?: string;
+  detail?: string;
+  status?: number;
+}

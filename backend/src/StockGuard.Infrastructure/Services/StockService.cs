@@ -144,6 +144,26 @@ public class StockService(StockGuardDbContext db) : IStockService
             .ToListAsync(ct);
     }
 
+    public async Task<IReadOnlyList<StockMovementResponse>> GetMovementsAsync(CancellationToken ct = default)
+    {
+        return await db.StockMovements
+            .AsNoTracking()
+            .OrderByDescending(m => m.CreatedAtUtc)
+            .Join(
+                db.Products.AsNoTracking(),
+                m => m.ProductId,
+                p => p.Id,
+                (m, p) => new StockMovementResponse(
+                    m.Id,
+                    m.ProductId,
+                    p.Name,
+                    m.QuantityDelta,
+                    m.Type,
+                    m.ReferenceOrderId,
+                    m.CreatedAtUtc))
+            .ToListAsync(ct);
+    }
+
     private static ProductResponse MapProduct(Product product) =>
         new(product.Id, product.Name, product.Sku, product.Price, product.StockQuantity, product.CreatedAtUtc, product.UpdatedAtUtc);
 }

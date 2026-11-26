@@ -4,6 +4,7 @@ import type {
   Order,
   ProblemDetailsError,
   Product,
+  StockMovement,
 } from '../types/stock';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:5002';
@@ -26,6 +27,16 @@ async function parseResponse<T>(response: Response): Promise<T> {
 
 export const stockApi = {
   baseUrl: API_BASE_URL,
+
+  async checkHealth(): Promise<{ online: boolean; latencyMs: number }> {
+    const start = performance.now();
+    try {
+      const res = await fetch(`${API_BASE_URL}/health`);
+      return { online: res.ok, latencyMs: Math.round(performance.now() - start) };
+    } catch {
+      return { online: false, latencyMs: 0 };
+    }
+  },
 
   async getProducts(): Promise<Product[]> {
     const res = await fetch(`${API_BASE_URL}/api/products`);
@@ -55,6 +66,11 @@ export const stockApi = {
     return parseResponse<Order[]>(res);
   },
 
+  async getMovements(): Promise<StockMovement[]> {
+    const res = await fetch(`${API_BASE_URL}/api/movements`);
+    return parseResponse<StockMovement[]>(res);
+  },
+
   async placeOrder(payload: CreateOrderPayload): Promise<Order> {
     const res = await fetch(`${API_BASE_URL}/api/orders`, {
       method: 'POST',
@@ -81,7 +97,7 @@ export const stockApi = {
       return {
         status: res.status,
         durationMs,
-        detail: `Pedido ${order.id.slice(0, 8)} confirmado`,
+        detail: `Pedido #${order.id.slice(0, 8)} confirmado`,
       };
     }
     let detail = `Status ${res.status}`;

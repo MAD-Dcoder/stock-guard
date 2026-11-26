@@ -33,6 +33,18 @@ export interface CreateOrderPayload {
   customerEmail: string;
 }
 
+export type StockMovementType = 1 | 2 | 3;
+
+export interface StockMovement {
+  id: string;
+  productId: string;
+  productName: string;
+  quantityDelta: number;
+  type: StockMovementType;
+  referenceOrderId: string | null;
+  createdAtUtc: string;
+}
+
 export interface ProblemDetailsError {
   title?: string;
   detail?: string;

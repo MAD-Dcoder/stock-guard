@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Activity,
+  AlertTriangle,
   Box,
+  ExternalLink,
+  History,
+  Layers,
   Moon,
   PackagePlus,
   RefreshCw,
@@ -11,10 +16,11 @@ import {
   Zap,
 } from 'lucide-react';
 import { stockApi } from './services/api';
-import type { Order, Product } from './types/stock';
+import type { Order, Product, StockMovement, StockMovementType } from './types/stock';
 import './App.css';
 
-type Tab = 'products' | 'orders' | 'concurrency';
+type Tab = 'products' | 'orders' | 'movements' | 'concurrency';
+type StockFilter = 'all' | 'low';
 
 interface ConcurrencyResult {
   attempt: number;
@@ -23,14 +29,26 @@ interface ConcurrencyResult {
   detail: string;
 }
 
+const MOVEMENT_LABELS: Record<StockMovementType, { label: string; badge: string }> = {
+  1: { label: 'Entrada inicial', badge: 'sg-badge-neutral' },
+  2: { label: 'Reposição', badge: 'sg-badge-success' },
+  3: { label: 'Venda (Pedido)', badge: 'sg-badge-warning' },
+};
+
 export function App() {
   const [tab, setTab] = useState<Tab>('products');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [movements, setMovements] = useState<StockMovement[]>([]);
+  const [health, setHealth] = useState<{ online: boolean; latencyMs: number }>({
+    online: false,
+    latencyMs: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [stockFilter, setStockFilter] = useState<StockFilter>('all');
   const [toast, setToast] = useState<string | null>(null);
 
   // Drawer Novo Produto
@@ -46,6 +64,7 @@ export function App() {
   const [concurrentCount, setConcurrentCount] = useState(10);
   const [runningStress, setRunningStress] = useState(false);
   const [stressResults, setStressResults] = useState<ConcurrencyResult[]>([]);
+  const [batchDurationMs, setBatchDurationMs] = useState<number | null>(null);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -60,13 +79,21 @@ export function App() {
     setLoading(true);
     setError(null);
     try {
-      const [prods, ords] = await Promise.all([stockApi.getProducts(), stockApi.getOrders()]);
+      const [healthRes, prods, ords, movs] = await Promise.all([
+        stockApi.checkHealth(),
+        stockApi.getProducts(),
+        stockApi.getOrders(),
+        stockApi.getMovements(),
+      ]);
+      setHealth(healthRes);
       setProducts(prods);
       setOrders(ords);
+      setMovements(movs);
       if (prods.length > 0 && !selectedProductId) {
         setSelectedProductId(prods[0].id);
       }
     } catch (err) {
+      setHealth({ online: false, latencyMs: 0 });
       setError(
         err instanceof Error
           ? `${err.message}. Verifique se a API .NET está rodando em ${stockApi.baseUrl}.`
@@ -83,19 +110,25 @@ export function App() {
 
   const filteredProducts = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return products;
-    return products.filter(
-      (p) => p.name.toLowerCase().includes(term) || p.sku.toLowerCase().includes(term),
-    );
-  }, [products, search]);
+    return products.filter((p) => {
+      const matchesTerm =
+        !term || p.name.toLowerCase().includes(term) || p.sku.toLowerCase().includes(term);
+      const matchesFilter = stockFilter === 'all' || p.stockQuantity <= 3;
+      return matchesTerm && matchesFilter;
+    });
+  }, [products, search, stockFilter]);
 
   const totalUnits = useMemo(
     () => products.reduce((sum, p) => sum + p.stockQuantity, 0),
     [products],
   );
-  const outOfStockCount = useMemo(
-    () => products.filter((p) => p.stockQuantity === 0).length,
+  const lowOrEmptyCount = useMemo(
+    () => products.filter((p) => p.stockQuantity <= 3).length,
     [products],
+  );
+  const totalRevenue = useMemo(
+    () => orders.reduce((sum, o) => sum + o.totalPrice, 0),
+    [orders],
   );
 
   const handleCreateProduct = async (e: React.FormEvent) => {
@@ -108,14 +141,14 @@ export function App() {
         price: Number(price),
         initialStock: Number(initialStock),
       });
-      setProducts((prev) => [...prev, created]);
-      setSelectedProductId(created.id);
       setDrawerOpen(false);
       setName('');
       setSku('');
       setPrice('');
       setInitialStock('1');
+      setSelectedProductId(created.id);
       showToast(`Produto "${created.name}" cadastrado.`);
+      await loadData();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Erro ao cadastrar produto.');
     } finally {
@@ -147,10 +180,19 @@ export function App() {
     }
   };
 
+  const openStressForProduct = (productId: string) => {
+    setSelectedProductId(productId);
+    setStressResults([]);
+    setBatchDurationMs(null);
+    setTab('concurrency');
+  };
+
   const handleRunConcurrencyTest = async () => {
     if (!selectedProductId) return;
     setRunningStress(true);
     setStressResults([]);
+    setBatchDurationMs(null);
+    const start = performance.now();
     try {
       const requests = Array.from({ length: concurrentCount }, (_, index) =>
         stockApi
@@ -163,12 +205,18 @@ export function App() {
       );
 
       const results = await Promise.all(requests);
+      setBatchDurationMs(Math.round(performance.now() - start));
       setStressResults(results);
       await loadData();
     } finally {
       setRunningStress(false);
     }
   };
+
+  const approvedStress = stressResults.filter((r) => r.status === 201).length;
+  const conflictStress = stressResults.filter((r) => r.status === 409).length;
+  const approvedPct =
+    stressResults.length > 0 ? Math.round((approvedStress / stressResults.length) * 100) : 0;
 
   const getStockBadge = (qty: number) => {
     if (qty === 0) return <span className="sg-badge sg-badge-danger">Esgotado</span>;
@@ -195,24 +243,64 @@ export function App() {
               className={`sg-nav-item ${tab === 'products' ? 'active' : ''}`}
               onClick={() => setTab('products')}
             >
-              <Box size={16} /> Estoque
+              <span className="sg-nav-left">
+                <Box size={16} /> Estoque
+              </span>
+              <span className="sg-nav-count tabular">{products.length}</span>
             </button>
             <button
               className={`sg-nav-item ${tab === 'orders' ? 'active' : ''}`}
               onClick={() => setTab('orders')}
             >
-              <ShoppingCart size={16} /> Pedidos ({orders.length})
+              <span className="sg-nav-left">
+                <ShoppingCart size={16} /> Pedidos
+              </span>
+              <span className="sg-nav-count tabular">{orders.length}</span>
+            </button>
+            <button
+              className={`sg-nav-item ${tab === 'movements' ? 'active' : ''}`}
+              onClick={() => setTab('movements')}
+            >
+              <span className="sg-nav-left">
+                <History size={16} /> Auditoria
+              </span>
+              <span className="sg-nav-count tabular">{movements.length}</span>
             </button>
             <button
               className={`sg-nav-item ${tab === 'concurrency' ? 'active' : ''}`}
               onClick={() => setTab('concurrency')}
             >
-              <Zap size={16} /> Lab de Concorrência
+              <span className="sg-nav-left">
+                <Zap size={16} /> Lab Concorrência
+              </span>
             </button>
           </nav>
         </div>
 
         <div className="sg-sidebar-footer">
+          <div className="sg-health-pill">
+            <span>
+              <span className={`sg-dot ${health.online ? 'online' : 'offline'}`} />
+              {health.online ? 'API .NET Online' : 'API Offline'}
+            </span>
+            {health.online && (
+              <span className="tabular" style={{ color: 'var(--text-muted)' }}>
+                {health.latencyMs} ms
+              </span>
+            )}
+          </div>
+
+          <a
+            className="sg-btn"
+            href={`${stockApi.baseUrl}/swagger`}
+            target="_blank"
+            rel="noreferrer"
+            style={{ justifyContent: 'space-between' }}
+          >
+            <span>Swagger / OpenAPI</span>
+            <ExternalLink size={14} />
+          </a>
+
           <button
             className="sg-btn"
             onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
@@ -229,15 +317,18 @@ export function App() {
             <h1 className="sg-title">
               {tab === 'products' && 'Catálogo & Estoque'}
               {tab === 'orders' && 'Histórico de Pedidos'}
+              {tab === 'movements' && 'Auditoria de Movimentações'}
               {tab === 'concurrency' && 'Laboratório de Concorrência'}
             </h1>
             <p className="sg-subtitle">
               {tab === 'products' &&
                 'Gerencie produtos e realize baixas com consistência transacional no PostgreSQL.'}
               {tab === 'orders' &&
-                'Pedidos confirmados dentro de transações ACID com auditoria de movimentação.'}
+                'Pedidos confirmados dentro de transações ACID com preço congelado no momento da compra.'}
+              {tab === 'movements' &&
+                'Trilha imutável de entradas iniciais, reposições e baixas por venda.'}
               {tab === 'concurrency' &&
-                'Dispare requisições simultâneas reais contra a API para validar bloqueio de overselling.'}
+                'Simule múltiplos clientes comprando ao mesmo tempo para validar o bloqueio de overselling.'}
             </p>
           </div>
 
@@ -262,37 +353,73 @@ export function App() {
 
         <section className="sg-kpi-grid">
           <div className="sg-card">
-            <div className="sg-kpi-label">Produtos cadastrados</div>
+            <div className="sg-kpi-top">
+              <span className="sg-kpi-label">Produtos ativos</span>
+              <Layers size={16} />
+            </div>
             <div className="sg-kpi-value tabular">{products.length}</div>
+            <div className="sg-kpi-hint">SKUs únicos cadastrados</div>
           </div>
           <div className="sg-card">
-            <div className="sg-kpi-label">Unidades disponíveis</div>
+            <div className="sg-kpi-top">
+              <span className="sg-kpi-label">Unidades em estoque</span>
+              <Box size={16} />
+            </div>
             <div className="sg-kpi-value tabular">{totalUnits}</div>
+            <div className="sg-kpi-hint">Saldo físico disponível</div>
           </div>
           <div className="sg-card">
-            <div className="sg-kpi-label">Itens esgotados</div>
-            <div className="sg-kpi-value tabular">{outOfStockCount}</div>
+            <div className="sg-kpi-top">
+              <span className="sg-kpi-label">Atenção / Críticos</span>
+              <AlertTriangle size={16} />
+            </div>
+            <div className="sg-kpi-value tabular">{lowOrEmptyCount}</div>
+            <div className="sg-kpi-hint">Itens com até 3 unidades</div>
           </div>
           <div className="sg-card">
-            <div className="sg-kpi-label">Pedidos confirmados</div>
-            <div className="sg-kpi-value tabular">{orders.length}</div>
+            <div className="sg-kpi-top">
+              <span className="sg-kpi-label">Volume vendido</span>
+              <Activity size={16} />
+            </div>
+            <div className="sg-kpi-value tabular">
+              R$ {totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </div>
+            <div className="sg-kpi-hint">{orders.length} pedido(s) confirmados</div>
           </div>
         </section>
 
         {tab === 'products' && (
           <section className="sg-card" style={{ padding: 0 }}>
             <div className="sg-toolbar">
-              <div className="sg-search">
-                <Search size={15} color="var(--text-muted)" />
-                <input
-                  type="text"
-                  placeholder="Buscar por nome ou SKU..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
+              <div className="sg-toolbar-left">
+                <div className="sg-search">
+                  <Search size={15} color="var(--text-muted)" />
+                  <input
+                    type="text"
+                    placeholder="Buscar por nome ou SKU..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
+
+                <div className="sg-filter-group">
+                  <button
+                    className={`sg-filter-btn ${stockFilter === 'all' ? 'active' : ''}`}
+                    onClick={() => setStockFilter('all')}
+                  >
+                    Todos ({products.length})
+                  </button>
+                  <button
+                    className={`sg-filter-btn ${stockFilter === 'low' ? 'active' : ''}`}
+                    onClick={() => setStockFilter('low')}
+                  >
+                    Críticos ({lowOrEmptyCount})
+                  </button>
+                </div>
               </div>
+
               <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                {filteredProducts.length} item(ns)
+                {filteredProducts.length} exibido(s)
               </span>
             </div>
 
@@ -310,39 +437,64 @@ export function App() {
                       <th>Produto</th>
                       <th>SKU</th>
                       <th>Preço</th>
-                      <th>Status</th>
+                      <th>Nível de Estoque</th>
                       <th style={{ textAlign: 'right' }}>Ações</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredProducts.map((product) => (
-                      <tr key={product.id}>
-                        <td style={{ fontWeight: 600 }}>{product.name}</td>
-                        <td className="tabular" style={{ color: 'var(--text-muted)' }}>
-                          {product.sku}
-                        </td>
-                        <td className="tabular">
-                          R$ {product.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </td>
-                        <td>{getStockBadge(product.stockQuantity)}</td>
-                        <td style={{ textAlign: 'right' }}>
-                          <div style={{ display: 'inline-flex', gap: '0.4rem' }}>
-                            <button
-                              className="sg-btn"
-                              onClick={() => void handleQuickRestock(product)}
-                            >
-                              +5 un.
-                            </button>
-                            <button
-                              className="sg-btn sg-btn-primary"
-                              onClick={() => void handleQuickBuy(product)}
-                            >
-                              Comprar 1
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {filteredProducts.map((product) => {
+                      const barPct = Math.min(100, (product.stockQuantity / 10) * 100);
+                      const barColor =
+                        product.stockQuantity === 0
+                          ? '#ef4444'
+                          : product.stockQuantity <= 3
+                            ? '#f59e0b'
+                            : '#10b981';
+
+                      return (
+                        <tr key={product.id}>
+                          <td style={{ fontWeight: 600 }}>{product.name}</td>
+                          <td className="tabular" style={{ color: 'var(--text-muted)' }}>
+                            {product.sku}
+                          </td>
+                          <td className="tabular">
+                            R$ {product.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td>
+                            {getStockBadge(product.stockQuantity)}
+                            <div className="sg-stock-bar-wrap">
+                              <div
+                                className="sg-stock-bar"
+                                style={{ width: `${barPct}%`, backgroundColor: barColor }}
+                              />
+                            </div>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <div style={{ display: 'inline-flex', gap: '0.4rem' }}>
+                              <button
+                                className="sg-btn sg-btn-sm"
+                                title="Testar compras simultâneas neste item"
+                                onClick={() => openStressForProduct(product.id)}
+                              >
+                                <Zap size={13} /> Testar
+                              </button>
+                              <button
+                                className="sg-btn sg-btn-sm"
+                                onClick={() => void handleQuickRestock(product)}
+                              >
+                                +5 un.
+                              </button>
+                              <button
+                                className="sg-btn sg-btn-sm sg-btn-primary"
+                                onClick={() => void handleQuickBuy(product)}
+                              >
+                                Comprar 1
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -364,7 +516,7 @@ export function App() {
                       <th>Cliente</th>
                       <th>Qtd</th>
                       <th>Total</th>
-                      <th>Data (UTC)</th>
+                      <th>Data</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -391,6 +543,59 @@ export function App() {
           </section>
         )}
 
+        {tab === 'movements' && (
+          <section className="sg-card" style={{ padding: 0 }}>
+            {movements.length === 0 ? (
+              <div className="sg-empty">Nenhuma movimentação registrada ainda.</div>
+            ) : (
+              <div className="sg-table-wrap">
+                <table className="sg-table">
+                  <thead>
+                    <tr>
+                      <th>Tipo</th>
+                      <th>Produto</th>
+                      <th>Variação</th>
+                      <th>Referência</th>
+                      <th>Data</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {movements.map((mov) => {
+                      const info = MOVEMENT_LABELS[mov.type] ?? {
+                        label: 'Outro',
+                        badge: 'sg-badge-neutral',
+                      };
+                      return (
+                        <tr key={mov.id}>
+                          <td>
+                            <span className={`sg-badge ${info.badge}`}>{info.label}</span>
+                          </td>
+                          <td style={{ fontWeight: 600 }}>{mov.productName}</td>
+                          <td
+                            className="tabular"
+                            style={{
+                              fontWeight: 700,
+                              color: mov.quantityDelta > 0 ? '#10b981' : '#f59e0b',
+                            }}
+                          >
+                            {mov.quantityDelta > 0 ? `+${mov.quantityDelta}` : mov.quantityDelta}
+                          </td>
+                          <td className="tabular" style={{ color: 'var(--text-muted)' }}>
+                            {mov.referenceOrderId ? `#${mov.referenceOrderId.slice(0, 8)}` : '—'}
+                          </td>
+                          <td className="tabular" style={{ color: 'var(--text-muted)' }}>
+                            {new Date(mov.createdAtUtc).toLocaleString('pt-BR')}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        )}
+
         {tab === 'concurrency' && (
           <section className="sg-card">
             <div
@@ -399,7 +604,7 @@ export function App() {
                 gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
                 gap: '1rem',
                 alignItems: 'end',
-                marginBottom: '1.25rem',
+                marginBottom: '1rem',
               }}
             >
               <div className="sg-field">
@@ -410,20 +615,27 @@ export function App() {
                 >
                   {products.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name} (estoque: {p.stockQuantity})
+                      {p.name} (estoque atual: {p.stockQuantity})
                     </option>
                   ))}
                 </select>
               </div>
               <div className="sg-field">
-                <label>Requisições simultâneas (Promise.all)</label>
-                <input
-                  type="number"
-                  min={2}
-                  max={50}
-                  value={concurrentCount}
-                  onChange={(e) => setConcurrentCount(Number(e.target.value))}
-                />
+                <label>Requisições simultâneas</label>
+                <div style={{ display: 'flex', gap: '0.4rem' }}>
+                  {[5, 10, 25, 50].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      className={`sg-btn sg-btn-sm ${
+                        concurrentCount === preset ? 'sg-btn-primary' : ''
+                      }`}
+                      onClick={() => setConcurrentCount(preset)}
+                    >
+                      {preset}x
+                    </button>
+                  ))}
+                </div>
               </div>
               <button
                 className="sg-btn sg-btn-primary"
@@ -438,21 +650,41 @@ export function App() {
 
             {stressResults.length > 0 && (
               <div>
-                <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
-                  <span className="sg-badge sg-badge-success">
-                    201 Aprovadas: {stressResults.filter((r) => r.status === 201).length}
-                  </span>
-                  <span className="sg-badge sg-badge-danger">
-                    409 Conflitos bloqueados: {stressResults.filter((r) => r.status === 409).length}
-                  </span>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '0.75rem',
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                    <span className="sg-badge sg-badge-success">
+                      201 Aprovadas: {approvedStress}
+                    </span>
+                    <span className="sg-badge sg-badge-danger">
+                      409 Bloqueadas: {conflictStress}
+                    </span>
+                  </div>
+                  {batchDurationMs !== null && (
+                    <span className="tabular" style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                      Lote paralelo concluído em {batchDurationMs} ms
+                    </span>
+                  )}
                 </div>
+
+                <div className="sg-progress-track">
+                  <div className="sg-progress-ok" style={{ width: `${approvedPct}%` }} />
+                </div>
+
                 <div className="sg-table-wrap">
                   <table className="sg-table">
                     <thead>
                       <tr>
                         <th>Requisição</th>
                         <th>HTTP Status</th>
-                        <th>Tempo</th>
+                        <th>Latência</th>
                         <th>Retorno da API</th>
                       </tr>
                     </thead>

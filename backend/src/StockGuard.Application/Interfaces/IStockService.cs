@@ -10,4 +10,5 @@ public interface IStockService
     Task<ProductResponse> RestockAsync(Guid productId, RestockRequest request, CancellationToken ct = default);
     Task<OrderResponse> PlaceOrderAsync(CreateOrderRequest request, CancellationToken ct = default);
     Task<IReadOnlyList<OrderResponse>> GetOrdersAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<StockMovementResponse>> GetMovementsAsync(CancellationToken ct = default);
 }

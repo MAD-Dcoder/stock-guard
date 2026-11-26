@@ -1,68 +1,75 @@
-# StockGuard
+# 📦 StockGuard — Controle de Estoque Atômico
 
-Sistema de gerenciamento de estoque e pedidos projetado para resolver **condições de corrida (*race conditions*)** e garantir **consistência transacional (ACID)** em cenários de compras simultâneas.
+![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)
+![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+![Render](https://img.shields.io/badge/Render-46E3B7?style=for-the-badge&logo=render&logoColor=white)
+![Vercel](https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)
 
-> Projeto 1 de 3 da série prática inspirada nos desafios reais de engenharia backend: ir além do CRUD básico, tratando concorrência, atomicidade, testes automatizados e reprodutibilidade de ambiente.
-
----
-
-## O Problema Resolvido
-
-Em um e-commerce comum, se há **apenas 1 unidade** de um produto em estoque e dois clientes clicam em "Comprar" ao mesmo tempo:
-1. A requisição A lê `estoque = 1` (ok).
-2. A requisição B lê `estoque = 1` (ok).
-3. Ambas aprovam a venda → **overselling** (2 vendas para 1 produto físico).
-
-Além disso, se o estoque for reduzido e ocorrer uma falha ao gravar o pedido, o produto some do estoque sem venda registrada.
-
-### Como o StockGuard resolve
-- **Atualização atômica condicional / Lock no banco de dados:** O decremento de estoque só é efetivado no PostgreSQL quando `quantity >= requested_quantity`, impedindo saldo negativo mesmo sob requisições paralelas.
-- **Transações ACID:** A baixa no estoque e a criação do pedido acontecem dentro da mesma transação — se qualquer etapa falhar, ocorre *rollback* automático.
-- **Testes de Concorrência:** Teste de integração automatizado disparando múltiplas requisições simultâneas contra um item com estoque `1`, validando que exatamente **1 compra é aprovada** e as demais recebem conflito (`409 Conflict`).
+> Sistema de gerenciamento de estoque e pedidos desenvolvido em **C# (.NET 10)** e **React + TypeScript**, projetado para eliminar **condições de corrida (*race conditions*)** e garantir **consistência transacional (ACID)** em compras simultâneas.
 
 ---
 
-## Stack Tecnológica
+## 📐 Arquitetura da Solução
 
-- **Backend:** C# / .NET 10 (ASP.NET Core Web API) + Entity Framework Core + Npgsql
-- **Banco de Dados:** PostgreSQL 16 (via Docker Compose)
-- **Frontend:** React + TypeScript (Vite)
-- **Testes:** xUnit + WebApplicationFactory / Testcontainers ou PostgreSQL em container
-- **CI/CD:** GitHub Actions (execução automática de build e testes a cada push/PR)
-- **Hospedagem (alvo):** Render (API em Docker) · Vercel (Frontend) · Neon/Supabase (PostgreSQL)
-
----
-
-## Estrutura Planejada do Repositório
-
-```text
-stock-guard/
-├── backend/
-│   ├── src/
-│   │   ├── StockGuard.Api/            # Controllers/Endpoints, Swagger, validação, DI
-│   │   ├── StockGuard.Application/    # Regras de negócio, DTOs, serviços
-│   │   ├── StockGuard.Domain/         # Entidades (Product, Order, StockMovement)
-│   │   └── StockGuard.Infrastructure/ # EF Core, DbContext, Migrations, repositórios
-│   └── tests/
-│       ├── StockGuard.UnitTests/      # Testes unitários de domínio/regras
-│       └── StockGuard.IntegrationTests/ # Testes de API e concorrência real no Postgres
-├── frontend/                          # React + TypeScript (Vite)
-├── docker-compose.yml                 # PostgreSQL + API
-├── .env.example                       # Variáveis de ambiente de exemplo
-└── README.md
+```mermaid
+graph TD
+    A[Front-end React + TypeScript / Vercel] -->|Requisições HTTP / JSON| B[API .NET 10 / Render]
+    B -->|Transação ACID + Update Atômico| C[(PostgreSQL 16 / Docker & Nuvem)]
+    D[GitHub Actions CI] -->|xUnit Concurrency Tests| B
 ```
 
 ---
 
-## Como Executar Localmente
+## ⚡ O Problema Resolvido
+
+Em um e-commerce comum, se há **apenas 1 unidade** de um produto em estoque e dois clientes tentam comprar ao mesmo tempo:
+1. A requisição **A** consulta o banco e lê `estoque = 1` (ok).
+2. A requisição **B** consulta o banco e lê `estoque = 1` (ok).
+3. Ambas aprovam a compra → **overselling** (2 vendas para 1 produto físico).
+
+Além disso, se o estoque for reduzido e ocorrer uma falha ao gravar o pedido, o produto some do estoque sem venda registrada.
+
+### Como o StockGuard resolve
+* **Atualização atômica condicional no PostgreSQL:** O decremento só é efetivado quando `quantity >= requested_quantity`, impedindo saldo negativo mesmo sob requisições paralelas.
+* **Transações ACID:** A baixa do estoque e o registro do pedido ocorrem na mesma transação — se qualquer etapa falhar, ocorre *rollback* automático.
+* **Testes de Concorrência:** Teste de integração automatizado disparando compras simultâneas contra um produto com estoque `1`, validando que apenas **1 compra é aprovada (`201`)** e as demais recebem conflito controlado (**`409 Conflict`**).
+
+---
+
+## 🛠️ Tecnologias & Arquitetura
+
+### ⚙️ Back-end (API)
+* **C# / .NET 10 (ASP.NET Core Web API)** — Plataforma principal da API.
+* **Entity Framework Core & Npgsql** — ORM, *Migrations* versionadas e controle transacional no PostgreSQL.
+* **Swagger / OpenAPI** — Documentação interativa e testes de endpoints em desenvolvimento.
+* **xUnit** — Testes unitários e testes de integração com simulação de concorrência real.
+* **Docker & Render** — Empacotamento em container e hospedagem automatizada.
+
+### 🎨 Front-end (Interface)
+* **React + TypeScript (Vite)** — Interface reativa tipada e painel de simulação de compras simultâneas.
+* **React Icons** — Design responsivo no estilo *Dark Mode Tech*.
+* **Vercel** — Deploy contínuo e distribuição global do front-end.
+
+### ☁️ Banco de Dados & CI/CD
+* **PostgreSQL 16** — Banco relacional via **Docker Compose** (local) e **Neon / Supabase** (nuvem).
+* **GitHub Actions** — Pipeline de integração contínua executando build e testes a cada *push* ou *Pull Request*.
+
+---
+
+## 🚀 Como Executar Localmente
 
 ### Pré-requisitos
-- [.NET 10 SDK](https://dotnet.microsoft.com/)
-- [Node.js 20+](https://nodejs.org/)
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+* [.NET 10 SDK](https://dotnet.microsoft.com/)
+* [Node.js 20+](https://nodejs.org/)
+* [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 
-### 1. Configurar variáveis de ambiente
+### 1. Clonar e configurar variáveis de ambiente
 ```bash
+git clone https://github.com/MAD-Dcoder/stock-guard.git
+cd stock-guard
 cp .env.example .env
 ```
 
@@ -71,16 +78,15 @@ cp .env.example .env
 docker compose up -d postgres
 ```
 
-### 3. Rodar o Backend (.NET 10)
+### 3. Executar o Back-end (.NET 10)
 ```bash
 cd backend
 dotnet restore
 dotnet ef database update --project src/StockGuard.Infrastructure --startup-project src/StockGuard.Api
 dotnet run --project src/StockGuard.Api
 ```
-A documentação interativa (OpenAPI / Swagger) ficará disponível em `http://localhost:5000/swagger` (ou porta configurada no `launchSettings.json`).
 
-### 4. Rodar o Frontend (React + TypeScript)
+### 4. Executar o Front-end (React + TypeScript)
 ```bash
 cd frontend
 npm install
@@ -89,7 +95,7 @@ npm run dev
 
 ---
 
-## Como Executar os Testes
+## 🧪 Como Executar os Testes
 
 ```bash
 cd backend
@@ -99,8 +105,8 @@ Os testes de integração incluem a simulação de **compras concorrentes simult
 
 ---
 
-## Limitações Conhecidas
+## ⚠️ Limitações Conhecidas
 
-- **Escala de escrita em único nó:** O controle de concorrência atual utiliza transação e bloqueio/atualização atômica diretamente no PostgreSQL, adequado para volumes pequenos e médios; para altíssima concorrência (ex.: *flash sales* globais), seria necessário evoluir para particionamento de estoque ou fila dedicada (ex.: RabbitMQ / SQS).
-- **Autenticação:** Nesta versão focada em consistência de estoque e pedidos, não há fluxo completo de autenticação JWT/OAuth de usuários.
-- **Pagamentos:** O registro do pedido simula a confirmação de compra sem integração com gateway externo (tema tratado em repositório dedicado de assinaturas/webhooks).
+* **Escala de escrita em único nó:** O controle de concorrência utiliza transação e bloqueio/atualização atômica diretamente no PostgreSQL, adequado para volumes pequenos e médios; para altíssima concorrência (ex.: *flash sales* globais), seria necessário evoluir para particionamento de estoque ou fila dedicada (ex.: RabbitMQ / SQS).
+* **Autenticação:** Nesta versão focada em consistência transacional de estoque e pedidos, não há fluxo completo de autenticação JWT de usuários.
+* **Pagamentos:** O registro do pedido simula a confirmação de compra sem integração com gateway externo (tema tratado em repositório dedicado de assinaturas/webhooks).

@@ -16,9 +16,9 @@
 
 ```mermaid
 graph TD
-    A[Front-end React + TypeScript / Vercel] -->|Requisições HTTP / JSON| B[API .NET 10 / Render]
-    B -->|Transação ACID + Update Atômico| C[(PostgreSQL 16 / Docker & Nuvem)]
-    D[GitHub Actions CI] -->|xUnit Concurrency Tests| B
+    A["Front-end React + TS<br/>(Vercel)"] -->|HTTP / JSON| B["API .NET 10<br/>(Render)"]
+    B -->|"Transação ACID<br/>Update Atômico"| C[("PostgreSQL 16<br/>Docker / Nuvem")]
+    D["GitHub Actions CI"] -->|xUnit Tests| B
 ```
 
 ---

@@ -1,0 +1,47 @@
+name: CI — Build & Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  backend-ci:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: stockguard
+          POSTGRES_PASSWORD: stockguard_dev_password
+          POSTGRES_DB: stockguard_db
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      ConnectionStrings__DefaultConnection: Host=localhost;Port=5433;Database=stockguard_db;Username=stockguard;Password=stockguard_dev_password
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore backend/StockGuard.slnx
+
+      - name: Build
+        run: dotnet build backend/StockGuard.slnx --no-restore --configuration Release
+
+      - name: Test (Unit + Concurrency Integration)
+        run: dotnet test backend/StockGuard.slnx --no-build --configuration Release --verbosity normal

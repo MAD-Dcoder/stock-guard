@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/StockGuard.Api/StockGuard.Api.csproj" />
+    <Project Path="src/StockGuard.Application/StockGuard.Application.csproj" />
+    <Project Path="src/StockGuard.Domain/StockGuard.Domain.csproj" />
+    <Project Path="src/StockGuard.Infrastructure/StockGuard.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/StockGuard.IntegrationTests/StockGuard.IntegrationTests.csproj" />
+    <Project Path="tests/StockGuard.UnitTests/StockGuard.UnitTests.csproj" />
+  </Folder>
+</Solution>

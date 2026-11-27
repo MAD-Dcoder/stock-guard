@@ -220,7 +220,8 @@ export function App() {
 
   const getStockBadge = (qty: number) => {
     if (qty === 0) return <span className="sg-badge sg-badge-danger">Esgotado</span>;
-    if (qty <= 3) return <span className="sg-badge sg-badge-warning">Últimas {qty} un.</span>;
+    if (qty === 1) return <span className="sg-badge sg-badge-warning">Última unidade</span>;
+    if (qty <= 3) return <span className="sg-badge sg-badge-warning">Baixo ({qty} un.)</span>;
     return <span className="sg-badge sg-badge-success">{qty} em estoque</span>;
   };
 
@@ -486,6 +487,7 @@ export function App() {
                               </button>
                               <button
                                 className="sg-btn sg-btn-sm sg-btn-primary"
+                                disabled={product.stockQuantity === 0}
                                 onClick={() => void handleQuickBuy(product)}
                               >
                                 Comprar 1

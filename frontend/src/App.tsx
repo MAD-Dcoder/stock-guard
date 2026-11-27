@@ -4,8 +4,10 @@ import {
   AlertTriangle,
   Box,
   ExternalLink,
+  HelpCircle,
   History,
   Layers,
+  Loader2,
   Moon,
   PackagePlus,
   RefreshCw,
@@ -356,13 +358,40 @@ export function App() {
 
         <div className="sg-sidebar-footer">
           <div className="sg-health-pill">
-            <span>
-              <span className={`sg-dot ${health.online ? 'online' : 'offline'}`} />
-              {health.online ? 'API .NET Online' : 'API Offline'}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+              {loading ? (
+                <>
+                  <Loader2 size={14} className="sg-spin" style={{ color: 'var(--primary)' }} />
+                  <span>Conectando à API...</span>
+                </>
+              ) : health.online ? (
+                <>
+                  <span className="sg-dot online" style={{ marginRight: 0 }} />
+                  <span>API .NET Online</span>
+                </>
+              ) : (
+                <>
+                  <Loader2 size={14} className="sg-spin" style={{ color: '#ef4444' }} />
+                  <span>API Offline / Acordando</span>
+                </>
+              )}
             </span>
-            {health.online && (
+
+            {health.online && !loading ? (
               <span className="tabular" style={{ color: 'var(--text-muted)' }}>
                 {health.latencyMs} ms
+              </span>
+            ) : (
+              <span
+                className="sg-help-wrap"
+                tabIndex={0}
+                aria-label="Por que os dados estão zerados?"
+              >
+                <HelpCircle size={15} />
+                <span className="sg-help-tooltip">
+                  Isso é normal: a API roda no plano gratuito do Render e hiberna após inatividade.
+                  Os dados ficam zerados enquanto ela acorda (~30s) e serão carregados em seguida.
+                </span>
               </span>
             )}
           </div>

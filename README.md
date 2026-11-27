@@ -10,6 +10,13 @@
 
 > Sistema de gerenciamento de estoque e pedidos desenvolvido em **C# (.NET 10)** e **React + TypeScript**, projetado para eliminar **condições de corrida (*race conditions*)** e garantir **consistência transacional (ACID)** em compras simultâneas.
 
+### 🌐 Acesso ao Vivo
+* **Aplicação Web (Vercel):** https://stock-guard-one.vercel.app
+* **API & Documentação Swagger (Render):** https://stock-guard-api.onrender.com/swagger
+* **Health Check (PostgreSQL):** https://stock-guard-api.onrender.com/health
+
+> *(Nota: a API roda no plano gratuito do Render, então o primeiro acesso após inatividade pode levar ~30s para acordar.)*
+
 ---
 
 ## 📐 Arquitetura da Solução

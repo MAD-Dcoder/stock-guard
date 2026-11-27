@@ -73,16 +73,17 @@ cd stock-guard
 cp .env.example .env
 ```
 
-### 2. Subir o banco de dados PostgreSQL
+### 2. Subir tudo com 1 comando (PostgreSQL + API)
+```bash
+docker compose up -d
+```
+A API aplica as *migrations* automaticamente e popula **4 produtos iniciais** (incluindo 1 item com estoque `1` para testar concorrência). O Swagger fica disponível em `http://localhost:5002/swagger`.
+
+### 3. Executar localmente sem container na API (opcional)
 ```bash
 docker compose up -d postgres
-```
 
-### 3. Executar o Back-end (.NET 10)
-```bash
 cd backend
-dotnet restore
-dotnet ef database update --project src/StockGuard.Infrastructure --startup-project src/StockGuard.Api
 dotnet run --project src/StockGuard.Api
 ```
 
@@ -95,13 +96,22 @@ npm run dev
 
 ---
 
+## 🔌 Principais Endpoints
+
+* `GET /health` — Health check real validando conexão com o PostgreSQL
+* `GET /api/products` · `POST /api/products` · `POST /api/products/{id}/restock`
+* `GET /api/orders` · `POST /api/orders` *(suporta header `Idempotency-Key`)* · `POST /api/orders/{id}/cancel` *(estorno atômico)*
+* `GET /api/movements` — Trilha de auditoria de movimentações
+
+---
+
 ## 🧪 Como Executar os Testes
 
 ```bash
 cd backend
 dotnet test
 ```
-Os testes de integração incluem a simulação de **compras concorrentes simultâneas** para validar o bloqueio de *overselling*.
+Os **8 testes** (`4` unitários + `4` de integração) validam regras de domínio, compras simultâneas concorrentes, idempotência via `Idempotency-Key` e cancelamento atômico com estorno.
 
 ---
 

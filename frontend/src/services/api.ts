@@ -14,7 +14,10 @@ async function parseResponse<T>(response: Response): Promise<T> {
     let message = `Erro HTTP ${response.status}`;
     try {
       const problem = (await response.json()) as ProblemDetailsError;
-      message = problem.detail || problem.title || message;
+      const validationMsg = problem.errors
+        ? Object.values(problem.errors).flat().join(' ')
+        : '';
+      message = problem.detail || validationMsg || problem.title || message;
     } catch {
       // mantém mensagem padrão
     }
@@ -97,27 +100,35 @@ export const stockApi = {
     detail: string;
   }> {
     const start = performance.now();
-    const res = await fetch(`${API_BASE_URL}/api/orders`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const durationMs = Math.round(performance.now() - start);
-    if (res.ok) {
-      const order = (await res.json()) as Order;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/orders`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const durationMs = Math.round(performance.now() - start);
+      if (res.ok) {
+        const order = (await res.json()) as Order;
+        return {
+          status: res.status,
+          durationMs,
+          detail: `Pedido #${order.id.slice(0, 8)} confirmado`,
+        };
+      }
+      let detail = `Status ${res.status}`;
+      try {
+        const problem = (await res.json()) as ProblemDetailsError;
+        detail = problem.detail || problem.title || detail;
+      } catch {
+        // ignora
+      }
+      return { status: res.status, durationMs, detail };
+    } catch (err) {
       return {
-        status: res.status,
-        durationMs,
-        detail: `Pedido #${order.id.slice(0, 8)} confirmado`,
+        status: 0,
+        durationMs: Math.round(performance.now() - start),
+        detail: err instanceof Error ? err.message : 'Falha de rede',
       };
     }
-    let detail = `Status ${res.status}`;
-    try {
-      const problem = (await res.json()) as ProblemDetailsError;
-      detail = problem.detail || problem.title || detail;
-    } catch {
-      // ignora
-    }
-    return { status: res.status, durationMs, detail };
   },
 };

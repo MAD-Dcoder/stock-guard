@@ -12,8 +12,16 @@ public class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Exception
         {
             await next(context);
         }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            if (!context.Response.HasStarted)
+                context.Response.StatusCode = StatusCodes.Status499ClientClosedRequest;
+        }
         catch (Exception ex)
         {
+            if (context.Response.HasStarted)
+                throw;
+
             var (statusCode, title) = ex switch
             {
                 NotFoundException => (HttpStatusCode.NotFound, "Recurso não encontrado"),
@@ -26,7 +34,6 @@ public class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Exception
                 logger.LogError(ex, "Erro inesperado ao processar {Method} {Path}", context.Request.Method, context.Request.Path);
 
             context.Response.StatusCode = (int)statusCode;
-            context.Response.ContentType = "application/problem+json";
 
             var problem = new ProblemDetails
             {
@@ -38,7 +45,10 @@ public class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Exception
                 Instance = context.Request.Path
             };
 
-            await context.Response.WriteAsJsonAsync(problem);
+            await context.Response.WriteAsJsonAsync(
+                problem,
+                options: null,
+                contentType: "application/problem+json");
         }
     }
 }

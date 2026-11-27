@@ -17,7 +17,7 @@ public class ConcurrencyTests : IClassFixture<WebApplicationFactory<Program>>
         _factory = factory;
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StockGuardDbContext>();
-        db.Database.EnsureCreated();
+        db.Database.Migrate();
     }
 
     [Fact]
@@ -103,7 +103,7 @@ public class ConcurrencyTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Fact]
-    public async Task PlaceOrder_WithSameIdempotencyKey_ShouldCreateOnlyOneOrder()
+    public async Task PlaceOrder_WithSameIdempotencyKeyConcurrentlyOnLastUnit_ShouldReturnSameOrderWithoutError()
     {
         var client = _factory.CreateClient();
         var sku = $"IDEM-{Guid.NewGuid():N}"[..16];
@@ -112,7 +112,7 @@ public class ConcurrencyTests : IClassFixture<WebApplicationFactory<Program>>
             Name: "SSD NVMe 1TB",
             Sku: sku,
             Price: 499.00m,
-            InitialStock: 5));
+            InitialStock: 1));
 
         createResponse.EnsureSuccessStatusCode();
         var product = await createResponse.Content.ReadFromJsonAsync<ProductResponse>();
@@ -121,35 +121,29 @@ public class ConcurrencyTests : IClassFixture<WebApplicationFactory<Program>>
         try
         {
             var idempotencyKey = $"key-{Guid.NewGuid():N}";
-            var payload = new CreateOrderRequest(product.Id, 2, "idem@stockguard.dev");
+            var payload = new CreateOrderRequest(product.Id, 1, "idem@stockguard.dev");
 
-            using var req1 = new HttpRequestMessage(HttpMethod.Post, "/api/orders")
+            var tasks = Enumerable.Range(0, 3).Select(_ =>
             {
-                Content = JsonContent.Create(payload)
-            };
-            req1.Headers.Add("Idempotency-Key", idempotencyKey);
+                var req = new HttpRequestMessage(HttpMethod.Post, "/api/orders")
+                {
+                    Content = JsonContent.Create(payload)
+                };
+                req.Headers.Add("Idempotency-Key", idempotencyKey);
+                return client.SendAsync(req);
+            }).ToArray();
 
-            using var req2 = new HttpRequestMessage(HttpMethod.Post, "/api/orders")
-            {
-                Content = JsonContent.Create(payload)
-            };
-            req2.Headers.Add("Idempotency-Key", idempotencyKey);
+            var responses = await Task.WhenAll(tasks);
 
-            var res1 = await client.SendAsync(req1);
-            var res2 = await client.SendAsync(req2);
+            Assert.All(responses, r => Assert.Equal(HttpStatusCode.Created, r.StatusCode));
 
-            Assert.Equal(HttpStatusCode.Created, res1.StatusCode);
-            Assert.Equal(HttpStatusCode.Created, res2.StatusCode);
-
-            var order1 = await res1.Content.ReadFromJsonAsync<OrderResponse>();
-            var order2 = await res2.Content.ReadFromJsonAsync<OrderResponse>();
-            Assert.NotNull(order1);
-            Assert.NotNull(order2);
-            Assert.Equal(order1.Id, order2.Id);
+            var orders = await Task.WhenAll(responses.Select(r => r.Content.ReadFromJsonAsync<OrderResponse>()));
+            var distinctIds = orders.Select(o => o!.Id).Distinct().ToList();
+            Assert.Single(distinctIds);
 
             var updatedProduct = await client.GetFromJsonAsync<ProductResponse>($"/api/products/{product.Id}");
             Assert.NotNull(updatedProduct);
-            Assert.Equal(3, updatedProduct.StockQuantity);
+            Assert.Equal(0, updatedProduct.StockQuantity);
         }
         finally
         {

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using StockGuard.Application.DTOs;
 using StockGuard.Application.Interfaces;
 using StockGuard.Domain.Entities;
@@ -27,8 +28,16 @@ public class StockService(StockGuardDbContext db) : IStockService
             db.StockMovements.Add(new StockMovement(product.Id, request.InitialStock, StockMovementType.Initial));
         }
 
-        await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw new ConflictException($"Já existe um produto cadastrado com o SKU '{normalizedSku}'.");
+        }
 
         return MapProduct(product);
     }
@@ -67,7 +76,7 @@ public class StockService(StockGuardDbContext db) : IStockService
 
         db.StockMovements.Add(new StockMovement(productId, request.Quantity, StockMovementType.Restock));
         await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
+        await transaction.CommitAsync(CancellationToken.None);
 
         var updated = await db.Products.AsNoTracking().FirstAsync(p => p.Id == productId, ct);
         return MapProduct(updated);
@@ -79,12 +88,17 @@ public class StockService(StockGuardDbContext db) : IStockService
         CancellationToken ct = default)
     {
         var normalizedKey = string.IsNullOrWhiteSpace(idempotencyKey) ? null : idempotencyKey.Trim();
+        if (normalizedKey is not null && normalizedKey.Length > 100)
+            throw new DomainException("O header 'Idempotency-Key' deve ter no máximo 100 caracteres.");
 
         if (normalizedKey is not null)
         {
             var existingOrder = await FindOrderByIdempotencyKeyAsync(normalizedKey, ct);
             if (existingOrder is not null)
+            {
+                EnsureIdempotentPayloadMatches(existingOrder, request);
                 return existingOrder;
+            }
         }
 
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -99,6 +113,20 @@ public class StockService(StockGuardDbContext db) : IStockService
 
         if (updatedRows == 0)
         {
+            await transaction.RollbackAsync(CancellationToken.None);
+
+            // Se outra requisição concorrente com a MESMA Idempotency-Key acabou de consumir a última unidade,
+            // retornamos o pedido já criado para preservar a semântica idempotente.
+            if (normalizedKey is not null)
+            {
+                var concurrentOrder = await FindOrderByIdempotencyKeyAsync(normalizedKey, ct);
+                if (concurrentOrder is not null)
+                {
+                    EnsureIdempotentPayloadMatches(concurrentOrder, request);
+                    return concurrentOrder;
+                }
+            }
+
             var productSnapshot = await db.Products
                 .AsNoTracking()
                 .Where(p => p.Id == request.ProductId)
@@ -126,14 +154,17 @@ public class StockService(StockGuardDbContext db) : IStockService
         try
         {
             await db.SaveChangesAsync(ct);
-            await transaction.CommitAsync(ct);
+            await transaction.CommitAsync(CancellationToken.None);
         }
-        catch (DbUpdateException) when (normalizedKey is not null)
+        catch (DbUpdateException ex) when (normalizedKey is not null && ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
-            await transaction.RollbackAsync(ct);
+            await transaction.RollbackAsync(CancellationToken.None);
             var concurrentOrder = await FindOrderByIdempotencyKeyAsync(normalizedKey, ct);
             if (concurrentOrder is not null)
+            {
+                EnsureIdempotentPayloadMatches(concurrentOrder, request);
                 return concurrentOrder;
+            }
             throw;
         }
 
@@ -160,6 +191,7 @@ public class StockService(StockGuardDbContext db) : IStockService
 
         if (cancelledRows == 0)
         {
+            await transaction.RollbackAsync(CancellationToken.None);
             var exists = await db.Orders.AsNoTracking().AnyAsync(o => o.Id == orderId, ct);
             if (!exists)
                 throw new NotFoundException($"Pedido {orderId} não encontrado.");
@@ -185,7 +217,7 @@ public class StockService(StockGuardDbContext db) : IStockService
             order.Id));
 
         await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
+        await transaction.CommitAsync(CancellationToken.None);
 
         return new OrderResponse(
             order.Id,
@@ -253,6 +285,18 @@ public class StockService(StockGuardDbContext db) : IStockService
                 o.Status,
                 o.CreatedAtUtc))
             .FirstOrDefaultAsync(ct);
+    }
+
+    private static void EnsureIdempotentPayloadMatches(OrderResponse existing, CreateOrderRequest request)
+    {
+        var normalizedEmail = request.CustomerEmail.Trim().ToLowerInvariant();
+        if (existing.ProductId != request.ProductId ||
+            existing.Quantity != request.Quantity ||
+            !string.Equals(existing.CustomerEmail, normalizedEmail, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ConflictException(
+                "A mesma 'Idempotency-Key' já foi utilizada com dados de pedido diferentes.");
+        }
     }
 
     private static ProductResponse MapProduct(Product product) =>

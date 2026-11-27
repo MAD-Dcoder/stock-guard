@@ -23,7 +23,7 @@ export interface Order {
   unitPrice: number;
   totalPrice: number;
   customerEmail: string;
-  status: number;
+  status: 1 | 2;
   createdAtUtc: string;
 }
 
@@ -49,4 +49,5 @@ export interface ProblemDetailsError {
   title?: string;
   detail?: string;
   status?: number;
+  errors?: Record<string, string[]>;
 }

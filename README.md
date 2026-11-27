@@ -57,7 +57,7 @@ Além disso, se o estoque for reduzido e ocorrer uma falha ao gravar o pedido, o
 
 ### 🎨 Front-end (Interface)
 * **React + TypeScript (Vite)** — Interface reativa tipada e painel de simulação de compras simultâneas.
-* **React Icons** — Design responsivo no estilo *Dark Mode Tech*.
+* **Lucide React** — Design operacional responsivo (*Light Clean SaaS* com alternância para *Modo Escuro*).
 * **Vercel** — Deploy contínuo e distribuição global do front-end.
 
 ### ☁️ Banco de Dados & CI/CD

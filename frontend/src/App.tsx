@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -51,6 +51,8 @@ export function App() {
   const [search, setSearch] = useState('');
   const [stockFilter, setStockFilter] = useState<StockFilter>('all');
   const [toast, setToast] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
 
   // Drawer Novo Produto
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -78,9 +80,23 @@ export function App() {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
+
   const showToast = (msg: string) => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
     setToast(msg);
-    setTimeout(() => setToast(null), 3500);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, 3500);
   };
 
   const loadData = useCallback(async () => {
@@ -97,11 +113,9 @@ export function App() {
       setProducts(prods);
       setOrders(ords);
       setMovements(movs);
-      if (prods.length > 0 && !selectedProductId) {
-        setSelectedProductId(prods[0].id);
-      }
-      if (prods.length > 0 && !orderProductId) {
-        setOrderProductId(prods[0].id);
+      if (prods.length > 0) {
+        setSelectedProductId((prev) => prev || prods[0].id);
+        setOrderProductId((prev) => prev || prods[0].id);
       }
     } catch (err) {
       setHealth({ online: false, latencyMs: 0 });
@@ -113,7 +127,7 @@ export function App() {
     } finally {
       setLoading(false);
     }
-  }, [selectedProductId]);
+  }, []);
 
   useEffect(() => {
     void loadData();
@@ -137,9 +151,13 @@ export function App() {
     () => products.filter((p) => p.stockQuantity <= 3).length,
     [products],
   );
-  const totalRevenue = useMemo(
-    () => orders.reduce((sum, o) => sum + o.totalPrice, 0),
+  const confirmedOrders = useMemo(
+    () => orders.filter((o) => o.status === 1),
     [orders],
+  );
+  const totalRevenue = useMemo(
+    () => confirmedOrders.reduce((sum, o) => sum + o.totalPrice, 0),
+    [confirmedOrders],
   );
 
   const handleCreateProduct = async (e: React.FormEvent) => {
@@ -168,6 +186,7 @@ export function App() {
   };
 
   const handleQuickBuy = async (product: Product) => {
+    setBusyId(`buy-${product.id}`);
     try {
       await stockApi.placeOrder(
         {
@@ -181,16 +200,21 @@ export function App() {
       await loadData();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Falha ao comprar.');
+    } finally {
+      setBusyId(null);
     }
   };
 
   const handleCancelOrder = async (order: Order) => {
+    setBusyId(`cancel-${order.id}`);
     try {
       await stockApi.cancelOrder(order.id);
       showToast(`Pedido #${order.id.slice(0, 8)} cancelado e estoque estornado.`);
       await loadData();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Falha ao cancelar pedido.');
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -219,12 +243,15 @@ export function App() {
   };
 
   const handleQuickRestock = async (product: Product) => {
+    setBusyId(`restock-${product.id}`);
     try {
       await stockApi.restockProduct(product.id, 5);
       showToast(`+5 unidades adicionadas em "${product.name}".`);
       await loadData();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Falha ao repor estoque.');
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -263,6 +290,7 @@ export function App() {
 
   const approvedStress = stressResults.filter((r) => r.status === 201).length;
   const conflictStress = stressResults.filter((r) => r.status === 409).length;
+  const errorStress = stressResults.filter((r) => r.status !== 201 && r.status !== 409).length;
   const approvedPct =
     stressResults.length > 0 ? Math.round((approvedStress / stressResults.length) * 100) : 0;
 
@@ -433,7 +461,7 @@ export function App() {
             <div className="sg-kpi-value tabular">
               R$ {totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
             </div>
-            <div className="sg-kpi-hint">{orders.length} pedido(s) confirmados</div>
+            <div className="sg-kpi-hint">{confirmedOrders.length} pedido(s) confirmados</div>
           </div>
         </section>
 
@@ -529,13 +557,14 @@ export function App() {
                               </button>
                               <button
                                 className="sg-btn sg-btn-sm"
+                                disabled={busyId !== null}
                                 onClick={() => void handleQuickRestock(product)}
                               >
                                 +5 un.
                               </button>
                               <button
                                 className="sg-btn sg-btn-sm sg-btn-primary"
-                                disabled={product.stockQuantity === 0}
+                                disabled={product.stockQuantity === 0 || busyId !== null}
                                 onClick={() => void handleQuickBuy(product)}
                               >
                                 Comprar 1
@@ -608,7 +637,7 @@ export function App() {
                         <td style={{ textAlign: 'right' }}>
                           <button
                             className="sg-btn sg-btn-sm"
-                            disabled={order.status !== 1}
+                            disabled={order.status !== 1 || busyId !== null}
                             onClick={() => void handleCancelOrder(order)}
                           >
                             {order.status === 1 ? 'Cancelar & Estornar' : 'Estornado'}
@@ -746,6 +775,11 @@ export function App() {
                     <span className="sg-badge sg-badge-danger">
                       409 Bloqueadas: {conflictStress}
                     </span>
+                    {errorStress > 0 && (
+                      <span className="sg-badge sg-badge-warning">
+                        Outros erros: {errorStress}
+                      </span>
+                    )}
                   </div>
                   {batchDurationMs !== null && (
                     <span className="tabular" style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>

@@ -18,4 +18,5 @@ EXPOSE 8080
 ENV ASPNETCORE_URLS=http://+:8080
 
 COPY --from=build /app/publish .
+USER $APP_UID
 ENTRYPOINT ["dotnet", "StockGuard.Api.dll"]

@@ -60,6 +60,13 @@ export function App() {
   const [initialStock, setInitialStock] = useState('1');
   const [submitting, setSubmitting] = useState(false);
 
+  // Drawer Novo Pedido
+  const [orderDrawerOpen, setOrderDrawerOpen] = useState(false);
+  const [orderProductId, setOrderProductId] = useState('');
+  const [orderQuantity, setOrderQuantity] = useState('1');
+  const [orderEmail, setOrderEmail] = useState('cliente@stockguard.dev');
+  const [submittingOrder, setSubmittingOrder] = useState(false);
+
   // Lab de Concorrência
   const [selectedProductId, setSelectedProductId] = useState('');
   const [concurrentCount, setConcurrentCount] = useState(10);
@@ -92,6 +99,9 @@ export function App() {
       setMovements(movs);
       if (prods.length > 0 && !selectedProductId) {
         setSelectedProductId(prods[0].id);
+      }
+      if (prods.length > 0 && !orderProductId) {
+        setOrderProductId(prods[0].id);
       }
     } catch (err) {
       setHealth({ online: false, latencyMs: 0 });
@@ -181,6 +191,30 @@ export function App() {
       await loadData();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Falha ao cancelar pedido.');
+    }
+  };
+
+  const handleCreateOrder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!orderProductId) return;
+    setSubmittingOrder(true);
+    try {
+      const created = await stockApi.placeOrder(
+        {
+          productId: orderProductId,
+          quantity: Number(orderQuantity),
+          customerEmail: orderEmail,
+        },
+        crypto.randomUUID(),
+      );
+      setOrderDrawerOpen(false);
+      setOrderQuantity('1');
+      showToast(`Pedido #${created.id.slice(0, 8)} confirmado!`);
+      await loadData();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Erro ao criar pedido.');
+    } finally {
+      setSubmittingOrder(false);
     }
   };
 
@@ -520,6 +554,18 @@ export function App() {
 
         {tab === 'orders' && (
           <section className="sg-card" style={{ padding: 0 }}>
+            <div className="sg-toolbar">
+              <span style={{ fontSize: '0.86rem', color: 'var(--text-muted)' }}>
+                {orders.length} pedido(s) registrado(s)
+              </span>
+              <button
+                className="sg-btn sg-btn-sm sg-btn-primary"
+                disabled={products.length === 0}
+                onClick={() => setOrderDrawerOpen(true)}
+              >
+                <ShoppingCart size={14} /> Novo pedido
+              </button>
+            </div>
             {orders.length === 0 ? (
               <div className="sg-empty">Nenhum pedido registrado ainda.</div>
             ) : (
@@ -813,6 +859,68 @@ export function App() {
 
             <button className="sg-btn sg-btn-primary" type="submit" disabled={submitting}>
               {submitting ? 'Salvando...' : 'Salvar produto'}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {orderDrawerOpen && (
+        <div className="sg-drawer-backdrop" onClick={() => setOrderDrawerOpen(false)}>
+          <form
+            className="sg-drawer"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => void handleCreateOrder(e)}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Novo pedido</h2>
+              <button
+                type="button"
+                className="sg-btn"
+                onClick={() => setOrderDrawerOpen(false)}
+                aria-label="Fechar"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="sg-field">
+              <label>Produto</label>
+              <select
+                required
+                value={orderProductId}
+                onChange={(e) => setOrderProductId(e.target.value)}
+              >
+                {products.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} (estoque: {p.stockQuantity})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="sg-field">
+              <label>Quantidade</label>
+              <input
+                required
+                type="number"
+                min="1"
+                value={orderQuantity}
+                onChange={(e) => setOrderQuantity(e.target.value)}
+              />
+            </div>
+
+            <div className="sg-field">
+              <label>E-mail do cliente</label>
+              <input
+                required
+                type="email"
+                value={orderEmail}
+                onChange={(e) => setOrderEmail(e.target.value)}
+              />
+            </div>
+
+            <button className="sg-btn sg-btn-primary" type="submit" disabled={submittingOrder}>
+              {submittingOrder ? 'Confirmando...' : 'Confirmar pedido'}
             </button>
           </form>
         </div>

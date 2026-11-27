@@ -40,7 +40,13 @@ app.UseSwaggerUI();
 app.UseCors();
 app.MapControllers();
 
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", utc = DateTime.UtcNow }));
+app.MapGet("/health", async (StockGuardDbContext db, CancellationToken ct) =>
+{
+    var canConnect = await db.Database.CanConnectAsync(ct);
+    return canConnect
+        ? Results.Ok(new { status = "healthy", database = "connected", utc = DateTime.UtcNow })
+        : Results.Json(new { status = "unhealthy", database = "disconnected", utc = DateTime.UtcNow }, statusCode: 503);
+});
 
 app.Run();
 

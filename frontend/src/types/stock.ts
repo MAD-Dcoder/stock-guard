@@ -33,7 +33,7 @@ export interface CreateOrderPayload {
   customerEmail: string;
 }
 
-export type StockMovementType = 1 | 2 | 3;
+export type StockMovementType = 1 | 2 | 3 | 4;
 
 export interface StockMovement {
   id: string;

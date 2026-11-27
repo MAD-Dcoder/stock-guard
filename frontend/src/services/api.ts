@@ -71,11 +71,22 @@ export const stockApi = {
     return parseResponse<StockMovement[]>(res);
   },
 
-  async placeOrder(payload: CreateOrderPayload): Promise<Order> {
+  async placeOrder(payload: CreateOrderPayload, idempotencyKey?: string): Promise<Order> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (idempotencyKey) {
+      headers['Idempotency-Key'] = idempotencyKey;
+    }
     const res = await fetch(`${API_BASE_URL}/api/orders`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload),
+    });
+    return parseResponse<Order>(res);
+  },
+
+  async cancelOrder(orderId: string): Promise<Order> {
+    const res = await fetch(`${API_BASE_URL}/api/orders/${orderId}/cancel`, {
+      method: 'POST',
     });
     return parseResponse<Order>(res);
   },

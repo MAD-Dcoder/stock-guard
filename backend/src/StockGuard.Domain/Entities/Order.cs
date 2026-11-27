@@ -12,12 +12,18 @@ public class Order
     public decimal UnitPrice { get; private set; }
     public decimal TotalPrice { get; private set; }
     public string CustomerEmail { get; private set; } = string.Empty;
+    public string? IdempotencyKey { get; private set; }
     public OrderStatus Status { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
 
     private Order() { }
 
-    public Order(Guid productId, int quantity, decimal unitPrice, string customerEmail)
+    public Order(
+        Guid productId,
+        int quantity,
+        decimal unitPrice,
+        string customerEmail,
+        string? idempotencyKey = null)
     {
         if (productId == Guid.Empty)
             throw new DomainException("Produto inválido.");
@@ -34,7 +40,16 @@ public class Order
         UnitPrice = unitPrice;
         TotalPrice = unitPrice * quantity;
         CustomerEmail = customerEmail.Trim().ToLowerInvariant();
+        IdempotencyKey = string.IsNullOrWhiteSpace(idempotencyKey) ? null : idempotencyKey.Trim();
         Status = OrderStatus.Confirmed;
         CreatedAtUtc = DateTime.UtcNow;
+    }
+
+    public void Cancel()
+    {
+        if (Status == OrderStatus.Cancelled)
+            throw new ConflictException($"O pedido {Id} já foi cancelado.");
+
+        Status = OrderStatus.Cancelled;
     }
 }

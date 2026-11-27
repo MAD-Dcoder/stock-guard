@@ -30,6 +30,8 @@ public class StockGuardDbContext(DbContextOptions<StockGuardDbContext> options) 
             entity.Property(o => o.UnitPrice).HasPrecision(18, 2);
             entity.Property(o => o.TotalPrice).HasPrecision(18, 2);
             entity.Property(o => o.CustomerEmail).HasMaxLength(200).IsRequired();
+            entity.Property(o => o.IdempotencyKey).HasMaxLength(100);
+            entity.HasIndex(o => o.IdempotencyKey).IsUnique();
             entity.HasOne(o => o.Product)
                 .WithMany()
                 .HasForeignKey(o => o.ProductId)

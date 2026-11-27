@@ -21,9 +21,22 @@ public class OrdersController(IStockService stockService) : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<OrderResponse>> Create([FromBody] CreateOrderRequest request, CancellationToken ct)
+    public async Task<ActionResult<OrderResponse>> Create(
+        [FromBody] CreateOrderRequest request,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
+        CancellationToken ct)
     {
-        var order = await stockService.PlaceOrderAsync(request, ct);
+        var order = await stockService.PlaceOrderAsync(request, idempotencyKey, ct);
         return Created($"/api/orders/{order.Id}", order);
+    }
+
+    [HttpPost("{id:guid}/cancel")]
+    [ProducesResponseType<OrderResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<OrderResponse>> Cancel(Guid id, CancellationToken ct)
+    {
+        var order = await stockService.CancelOrderAsync(id, ct);
+        return Ok(order);
     }
 }

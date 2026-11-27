@@ -73,8 +73,20 @@ public class StockService(StockGuardDbContext db) : IStockService
         return MapProduct(updated);
     }
 
-    public async Task<OrderResponse> PlaceOrderAsync(CreateOrderRequest request, CancellationToken ct = default)
+    public async Task<OrderResponse> PlaceOrderAsync(
+        CreateOrderRequest request,
+        string? idempotencyKey = null,
+        CancellationToken ct = default)
     {
+        var normalizedKey = string.IsNullOrWhiteSpace(idempotencyKey) ? null : idempotencyKey.Trim();
+
+        if (normalizedKey is not null)
+        {
+            var existingOrder = await FindOrderByIdempotencyKeyAsync(normalizedKey, ct);
+            if (existingOrder is not null)
+                return existingOrder;
+        }
+
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
 
         // Atualização atômica condicional no PostgreSQL: adquire lock de linha e só
@@ -105,11 +117,72 @@ public class StockService(StockGuardDbContext db) : IStockService
             .Select(p => new { p.Name, p.Price })
             .FirstAsync(ct);
 
-        var order = new Order(request.ProductId, request.Quantity, product.Price, request.CustomerEmail);
+        var order = new Order(request.ProductId, request.Quantity, product.Price, request.CustomerEmail, normalizedKey);
         var movement = new StockMovement(request.ProductId, -request.Quantity, StockMovementType.Sale, order.Id);
 
         db.Orders.Add(order);
         db.StockMovements.Add(movement);
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        catch (DbUpdateException) when (normalizedKey is not null)
+        {
+            await transaction.RollbackAsync(ct);
+            var concurrentOrder = await FindOrderByIdempotencyKeyAsync(normalizedKey, ct);
+            if (concurrentOrder is not null)
+                return concurrentOrder;
+            throw;
+        }
+
+        return new OrderResponse(
+            order.Id,
+            order.ProductId,
+            product.Name,
+            order.Quantity,
+            order.UnitPrice,
+            order.TotalPrice,
+            order.CustomerEmail,
+            order.Status,
+            order.CreatedAtUtc);
+    }
+
+    public async Task<OrderResponse> CancelOrderAsync(Guid orderId, CancellationToken ct = default)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+
+        var cancelledRows = await db.Orders
+            .Where(o => o.Id == orderId && o.Status == OrderStatus.Confirmed)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(o => o.Status, OrderStatus.Cancelled), ct);
+
+        if (cancelledRows == 0)
+        {
+            var exists = await db.Orders.AsNoTracking().AnyAsync(o => o.Id == orderId, ct);
+            if (!exists)
+                throw new NotFoundException($"Pedido {orderId} não encontrado.");
+
+            throw new ConflictException($"O pedido {orderId} já foi cancelado.");
+        }
+
+        var order = await db.Orders
+            .AsNoTracking()
+            .Include(o => o.Product)
+            .FirstAsync(o => o.Id == orderId, ct);
+
+        await db.Products
+            .Where(p => p.Id == order.ProductId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(p => p.StockQuantity, p => p.StockQuantity + order.Quantity)
+                .SetProperty(p => p.UpdatedAtUtc, DateTime.UtcNow), ct);
+
+        db.StockMovements.Add(new StockMovement(
+            order.ProductId,
+            order.Quantity,
+            StockMovementType.Cancellation,
+            order.Id));
 
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
@@ -117,7 +190,7 @@ public class StockService(StockGuardDbContext db) : IStockService
         return new OrderResponse(
             order.Id,
             order.ProductId,
-            product.Name,
+            order.Product?.Name ?? string.Empty,
             order.Quantity,
             order.UnitPrice,
             order.TotalPrice,
@@ -162,6 +235,24 @@ public class StockService(StockGuardDbContext db) : IStockService
                     m.ReferenceOrderId,
                     m.CreatedAtUtc))
             .ToListAsync(ct);
+    }
+
+    private async Task<OrderResponse?> FindOrderByIdempotencyKeyAsync(string key, CancellationToken ct)
+    {
+        return await db.Orders
+            .AsNoTracking()
+            .Where(o => o.IdempotencyKey == key)
+            .Select(o => new OrderResponse(
+                o.Id,
+                o.ProductId,
+                o.Product != null ? o.Product.Name : string.Empty,
+                o.Quantity,
+                o.UnitPrice,
+                o.TotalPrice,
+                o.CustomerEmail,
+                o.Status,
+                o.CreatedAtUtc))
+            .FirstOrDefaultAsync(ct);
     }
 
     private static ProductResponse MapProduct(Product product) =>

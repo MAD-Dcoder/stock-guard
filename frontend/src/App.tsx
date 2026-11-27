@@ -33,6 +33,7 @@ const MOVEMENT_LABELS: Record<StockMovementType, { label: string; badge: string 
   1: { label: 'Entrada inicial', badge: 'sg-badge-neutral' },
   2: { label: 'Reposição', badge: 'sg-badge-success' },
   3: { label: 'Venda (Pedido)', badge: 'sg-badge-warning' },
+  4: { label: 'Estorno (Cancelamento)', badge: 'sg-badge-success' },
 };
 
 export function App() {
@@ -158,15 +159,28 @@ export function App() {
 
   const handleQuickBuy = async (product: Product) => {
     try {
-      await stockApi.placeOrder({
-        productId: product.id,
-        quantity: 1,
-        customerEmail: 'cliente@stockguard.dev',
-      });
+      await stockApi.placeOrder(
+        {
+          productId: product.id,
+          quantity: 1,
+          customerEmail: 'cliente@stockguard.dev',
+        },
+        crypto.randomUUID(),
+      );
       showToast(`Compra de 1x "${product.name}" confirmada (201).`);
       await loadData();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Falha ao comprar.');
+    }
+  };
+
+  const handleCancelOrder = async (order: Order) => {
+    try {
+      await stockApi.cancelOrder(order.id);
+      showToast(`Pedido #${order.id.slice(0, 8)} cancelado e estoque estornado.`);
+      await loadData();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Falha ao cancelar pedido.');
     }
   };
 
@@ -518,7 +532,9 @@ export function App() {
                       <th>Cliente</th>
                       <th>Qtd</th>
                       <th>Total</th>
+                      <th>Status</th>
                       <th>Data</th>
+                      <th style={{ textAlign: 'right' }}>Ação</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -533,8 +549,24 @@ export function App() {
                         <td className="tabular">
                           R$ {order.totalPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </td>
+                        <td>
+                          {order.status === 1 ? (
+                            <span className="sg-badge sg-badge-success">Confirmado</span>
+                          ) : (
+                            <span className="sg-badge sg-badge-danger">Cancelado</span>
+                          )}
+                        </td>
                         <td className="tabular" style={{ color: 'var(--text-muted)' }}>
                           {new Date(order.createdAtUtc).toLocaleString('pt-BR')}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <button
+                            className="sg-btn sg-btn-sm"
+                            disabled={order.status !== 1}
+                            onClick={() => void handleCancelOrder(order)}
+                          >
+                            {order.status === 1 ? 'Cancelar & Estornar' : 'Estornado'}
+                          </button>
                         </td>
                       </tr>
                     ))}

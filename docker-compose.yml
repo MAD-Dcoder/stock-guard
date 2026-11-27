@@ -17,5 +17,20 @@ services:
       timeout: 5s
       retries: 5
 
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: stockguard-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB:-stockguard_db};Username=${POSTGRES_USER:-stockguard};Password=${POSTGRES_PASSWORD:-stockguard_dev_password}
+    ports:
+      - "5002:8080"
+
 volumes:
   postgres_data:

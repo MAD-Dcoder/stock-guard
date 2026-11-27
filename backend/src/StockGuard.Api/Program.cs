@@ -26,6 +26,12 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<StockGuardDbContext>();
+    await DbSeeder.SeedAsync(db);
+}
+
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 app.UseSwagger();
